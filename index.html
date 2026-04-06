@@ -1,0 +1,1040 @@
+{
+  "updated_at": "2026-04-04 03:57:13",
+  "totals": {
+    "livelo_pontos": 5785856,
+    "smiles_milhas": 3306456,
+    "latam_milhas": 901600,
+    "total_contas": 341,
+    "clubes_ativos": 79,
+    "clubes_pendentes": 137,
+    "valor_mensal_total": 127916
+  },
+  "operators": [
+    {
+      "name": "XMILES",
+      "livelo": {
+        "total_contas": 258,
+        "total_pontos": 4406877,
+        "clubes_ativos": 44,
+        "clubes_pendentes": 94,
+        "sem_clube": 102,
+        "valor_mensal_clubes": 74654,
+        "distribuicao_clubes": {
+          "CLASSIC": 64,
+          "TOP": 89,
+          "SEM CLUBE": 102,
+          "PLUS": 1,
+          "SUPER": 2
+        },
+        "distribuicao_status": {
+          "INDEFINIDO": 15,
+          "PAGAMENTO PENDENTE": 94,
+          "SEM CLUBE": 102,
+          "ATIVO": 44,
+          "ERRO SENHA": 2,
+          "CANCELADO": 1
+        }
+      },
+      "smiles": {
+        "total_contas": 258,
+        "total_milhas": 2850936,
+        "distribuicao_status": {
+          "ATIVO": 49,
+          "SEM CLUBE": 119,
+          "INDEFINIDO": 6,
+          "PAGAMENTO PENDENTE": 81,
+          "CANCELADO": 3
+        }
+      },
+      "latam": {
+        "total_contas": 258,
+        "total_milhas": 1395
+      }
+    },
+    {
+      "name": "MARCUS",
+      "livelo": {
+        "total_contas": 38,
+        "total_pontos": 466153,
+        "clubes_ativos": 18,
+        "clubes_pendentes": 20,
+        "sem_clube": 0,
+        "valor_mensal_clubes": 22812,
+        "distribuicao_clubes": {
+          "TOP": 28,
+          "CLASSIC": 10
+        },
+        "distribuicao_status": {
+          "PAGAMENTO PENDENTE": 20,
+          "ATIVO": 18
+        }
+      },
+      "smiles": {
+        "total_contas": 12,
+        "total_milhas": 180,
+        "distribuicao_status": {
+          "PAGAMENTO PENDENTE": 4,
+          "ATIVO": 8
+        }
+      },
+      "latam": {
+        "total_contas": 5,
+        "total_milhas": 900000
+      }
+    },
+    {
+      "name": "ANDERSON",
+      "livelo": {
+        "total_contas": 16,
+        "total_pontos": 245592,
+        "clubes_ativos": 8,
+        "clubes_pendentes": 8,
+        "sem_clube": 0,
+        "valor_mensal_clubes": 12784,
+        "distribuicao_clubes": {
+          "TOP": 16
+        },
+        "distribuicao_status": {
+          "PAGAMENTO PENDENTE": 8,
+          "ATIVO": 8
+        }
+      },
+      "smiles": {
+        "total_contas": 16,
+        "total_milhas": 157150,
+        "distribuicao_status": {
+          "PAGAMENTO PENDENTE": 16
+        }
+      },
+      "latam": {
+        "total_contas": 16,
+        "total_milhas": 205
+      }
+    },
+    {
+      "name": "JESSICA",
+      "livelo": {
+        "total_contas": 29,
+        "total_pontos": 667234,
+        "clubes_ativos": 9,
+        "clubes_pendentes": 15,
+        "sem_clube": 5,
+        "valor_mensal_clubes": 17666,
+        "distribuicao_clubes": {
+          "TOP": 22,
+          "SEM CLUBE": 5,
+          "CLASSIC": 2
+        },
+        "distribuicao_status": {
+          "ATIVO": 9,
+          "PAGAMENTO PENDENTE": 15,
+          "SEM CLUBE": 4,
+          "INDEFINIDO": 1
+        }
+      },
+      "smiles": {
+        "total_contas": 29,
+        "total_milhas": 298190,
+        "distribuicao_status": {
+          "PAGAMENTO PENDENTE": 23,
+          "ATIVO": 6
+        }
+      },
+      "latam": {
+        "total_contas": 1,
+        "total_milhas": 0
+      }
+    }
+  ]
+}
+#!/usr/bin/env python3
+"""
+XMiles Dashboard - Extrator de Dados
+Lê a planilha CONTROLE CONTAS LIVELO.xlsx e gera data.json para o dashboard.
+Executar sempre que atualizar a planilha, depois fazer push pro GitHub.
+
+Uso: python extract_data.py [caminho_da_planilha]
+"""
+
+import pandas as pd
+import numpy as np
+import json
+import sys
+import os
+from datetime import datetime
+
+DEFAULT_FILE = "../CONTROLE CONTAS LIVELO.xlsx"
+
+OPERATOR_SHEETS = {
+    "XMILES": "CONTAS - XMILES",
+    "MARCUS": "CONTAS - MARCUS",
+    "ANDERSON": "CONTAS - ANDERSON",
+    "JESSICA": "CONTAS - JESSICA",
+}
+
+LIVELO_FIXED_COLS = {
+    "conta": 0, "obs": 1, "milhas": 2, "custo_medio": 3,
+    "clube": 4, "valor_clube": 5, "cartao": 6, "tempo_clube": 7,
+    "pagamento": 8, "data_cobranca": 9, "regularizar": 10,
+    "data_assinatura": 11,
+}
+
+SMILES_FIXED_COLS = {
+    "conta": 20, "obs": 21, "data_cobranca": 22, "cartao": 23,
+    "milhas": 24,
+}
+
+LATAM_COLS = {
+    "conta": 45, "milhas": 47,
+}
+
+
+def find_col_by_header(df, start_col, end_col, header_name):
+    """Find column index by header name in row 1."""
+    for col in range(start_col, min(end_col, df.shape[1])):
+        val = safe_str(df.iloc[1, col]).upper()
+        if val == header_name.upper():
+            return col
+    return None
+
+
+def safe_int(val):
+    try:
+        v = float(val)
+        return int(v) if not np.isnan(v) else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def safe_str(val):
+    if pd.isna(val):
+        return ""
+    return str(val).strip()
+
+
+def classify_status(raw):
+    s = safe_str(raw).upper()
+    if not s or s == "-" or s == "0":
+        return "INDEFINIDO"
+    if "ATIVO" in s:
+        return "ATIVO"
+    if "PENDENTE" in s:
+        return "PAGAMENTO PENDENTE"
+    if "SEM CLUBE" in s:
+        return "SEM CLUBE"
+    if "SENHA" in s:
+        return "ERRO SENHA"
+    if "CANCEL" in s:
+        return "CANCELADO"
+    return s
+
+
+def classify_clube(raw):
+    s = safe_str(raw).upper()
+    if not s or s == "0" or "SEM CLUBE" in s:
+        return "SEM CLUBE"
+    if "TOP" in s:
+        return "TOP"
+    if "CLASSIC" in s:
+        return "CLASSIC"
+    if "SUPER" in s:
+        return "SUPER"
+    if "PLUS" in s:
+        return "PLUS"
+    return "OUTRO"
+
+
+def extract_operator(df, operator_name):
+    data = {"name": operator_name, "livelo": {}, "smiles": {}, "latam": {}}
+
+    # Auto-detect STATUS columns
+    livelo_status_col = find_col_by_header(df, 12, 20, "STATUS") or 15
+    smiles_status_col = find_col_by_header(df, 25, 40, "STATUS") or 30
+
+    # --- LIVELO ---
+    livelo_rows = []
+    for i in range(2, len(df)):
+        conta = safe_str(df.iloc[i, LIVELO_FIXED_COLS["conta"]])
+        if not conta:
+            continue
+        milhas = safe_int(df.iloc[i, LIVELO_FIXED_COLS["milhas"]])
+        clube = classify_clube(df.iloc[i, LIVELO_FIXED_COLS["clube"]])
+        valor = safe_int(df.iloc[i, LIVELO_FIXED_COLS["valor_clube"]])
+        status = classify_status(df.iloc[i, livelo_status_col])
+        livelo_rows.append({
+            "conta": conta, "milhas": milhas, "clube": clube,
+            "valor_clube": valor, "status": status,
+        })
+
+    total_pts = sum(r["milhas"] for r in livelo_rows)
+    clubes_ativos = sum(1 for r in livelo_rows if r["status"] == "ATIVO")
+    clubes_pendentes = sum(1 for r in livelo_rows if r["status"] == "PAGAMENTO PENDENTE")
+    sem_clube = sum(1 for r in livelo_rows if r["clube"] == "SEM CLUBE")
+    valor_mensal = sum(r["valor_clube"] for r in livelo_rows)
+
+    clube_dist = {}
+    for r in livelo_rows:
+        clube_dist[r["clube"]] = clube_dist.get(r["clube"], 0) + 1
+
+    status_dist = {}
+    for r in livelo_rows:
+        status_dist[r["status"]] = status_dist.get(r["status"], 0) + 1
+
+    data["livelo"] = {
+        "total_contas": len(livelo_rows),
+        "total_pontos": total_pts,
+        "clubes_ativos": clubes_ativos,
+        "clubes_pendentes": clubes_pendentes,
+        "sem_clube": sem_clube,
+        "valor_mensal_clubes": valor_mensal,
+        "distribuicao_clubes": clube_dist,
+        "distribuicao_status": status_dist,
+        "contas": livelo_rows,
+    }
+
+    # --- SMILES ---
+    smiles_rows = []
+    for i in range(2, len(df)):
+        conta = safe_str(df.iloc[i, SMILES_FIXED_COLS["conta"]])
+        if not conta:
+            continue
+        milhas = safe_int(df.iloc[i, SMILES_FIXED_COLS["milhas"]])
+        status = classify_status(df.iloc[i, smiles_status_col]) if smiles_status_col < df.shape[1] else "INDEFINIDO"
+        smiles_rows.append({"conta": conta, "milhas": milhas, "status": status})
+
+    smiles_status_dist = {}
+    for r in smiles_rows:
+        smiles_status_dist[r["status"]] = smiles_status_dist.get(r["status"], 0) + 1
+
+    data["smiles"] = {
+        "total_contas": len(smiles_rows),
+        "total_milhas": sum(r["milhas"] for r in smiles_rows),
+        "distribuicao_status": smiles_status_dist,
+        "contas": smiles_rows,
+    }
+
+    # --- LATAM ---
+    latam_rows = []
+    for i in range(2, len(df)):
+        if LATAM_COLS["conta"] >= df.shape[1]:
+            break
+        conta = safe_str(df.iloc[i, LATAM_COLS["conta"]])
+        if not conta:
+            continue
+        milhas_col = LATAM_COLS["milhas"] if LATAM_COLS["milhas"] < df.shape[1] else LATAM_COLS["conta"] + 2
+        milhas = safe_int(df.iloc[i, milhas_col]) if milhas_col < df.shape[1] else 0
+        latam_rows.append({"conta": conta, "milhas": milhas})
+
+    data["latam"] = {
+        "total_contas": len(latam_rows),
+        "total_milhas": sum(r["milhas"] for r in latam_rows),
+        "contas": latam_rows,
+    }
+
+    return data
+
+
+def main():
+    filepath = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_FILE
+    if not os.path.exists(filepath):
+        print(f"Arquivo nao encontrado: {filepath}")
+        sys.exit(1)
+
+    print(f"Lendo: {filepath}")
+    xls = pd.ExcelFile(filepath)
+
+    operators = []
+    for op_name, sheet_name in OPERATOR_SHEETS.items():
+        if sheet_name in xls.sheet_names:
+            print(f"  Processando: {sheet_name}")
+            df = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
+            operators.append(extract_operator(df, op_name))
+
+    # Totals
+    totals = {
+        "livelo_pontos": sum(op["livelo"]["total_pontos"] for op in operators),
+        "smiles_milhas": sum(op["smiles"]["total_milhas"] for op in operators),
+        "latam_milhas": sum(op["latam"]["total_milhas"] for op in operators),
+        "total_contas": sum(op["livelo"]["total_contas"] for op in operators),
+        "clubes_ativos": sum(op["livelo"]["clubes_ativos"] for op in operators),
+        "clubes_pendentes": sum(op["livelo"]["clubes_pendentes"] for op in operators),
+        "valor_mensal_total": sum(op["livelo"]["valor_mensal_clubes"] for op in operators),
+    }
+
+    dashboard_data = {
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "totals": totals,
+        "operators": operators,
+    }
+
+    # Write without individual account details for lighter file
+    light_data = json.loads(json.dumps(dashboard_data))
+    for op in light_data["operators"]:
+        op["livelo"].pop("contas", None)
+        op["smiles"].pop("contas", None)
+        op["latam"].pop("contas", None)
+
+    output = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
+    with open(output, "w", encoding="utf-8") as f:
+        json.dump(light_data, f, ensure_ascii=False, indent=2)
+    print(f"\ndata.json gerado: {output}")
+    print(f"  Livelo: {totals['livelo_pontos']:,} pts")
+    print(f"  Smiles: {totals['smiles_milhas']:,} mi")
+    print(f"  LATAM:  {totals['latam_milhas']:,} mi")
+    print(f"  Contas: {totals['total_contas']}")
+
+    # Full data for detailed views
+    full_output = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_full.json")
+    with open(full_output, "w", encoding="utf-8") as f:
+        json.dump(dashboard_data, f, ensure_ascii=False, indent=2)
+    print(f"data_full.json gerado: {full_output}")
+
+
+if __name__ == "__main__":
+    main()
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XMiles - Dashboard de Producao</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0f1117;
+  --card: #1a1d26;
+  --card-border: #2a2d38;
+  --text: #e4e4e7;
+  --text-muted: #8b8d97;
+  --accent: #6366f1;
+  --accent2: #8b5cf6;
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+  --orange: #f97316;
+  --blue: #3b82f6;
+  --cyan: #06b6d4;
+  --livelo: #e63888;
+  --smiles: #ff6b00;
+  --latam: #1b0088;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.header {
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--card-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header .updated {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.header .updated span { color: var(--green); }
+
+.container { padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+
+/* KPI Cards */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.kpi-card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 4px;
+  height: 100%;
+  border-radius: 12px 0 0 12px;
+}
+
+.kpi-card.livelo::before { background: var(--livelo); }
+.kpi-card.smiles::before { background: var(--smiles); }
+.kpi-card.latam::before { background: var(--blue); }
+.kpi-card.info::before { background: var(--accent); }
+.kpi-card.money::before { background: var(--green); }
+.kpi-card.warn::before { background: var(--yellow); }
+
+.kpi-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.kpi-value { font-size: 28px; font-weight: 700; line-height: 1; }
+.kpi-sub { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+
+.kpi-value.livelo { color: var(--livelo); }
+.kpi-value.smiles { color: var(--smiles); }
+.kpi-value.latam { color: var(--blue); }
+.kpi-value.green { color: var(--green); }
+.kpi-value.yellow { color: var(--yellow); }
+
+/* Sections */
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.row { display: grid; gap: 16px; margin-bottom: 28px; }
+.row-2 { grid-template-columns: 1fr 1fr; }
+.row-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.card h3 { font-size: 14px; color: var(--text-muted); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.chart-container { position: relative; height: 260px; }
+
+/* Operator Table */
+.op-table { width: 100%; border-collapse: collapse; }
+.op-table th { font-size: 11px; text-transform: uppercase; color: var(--text-muted); text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--card-border); }
+.op-table td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px; }
+.op-table tr:hover td { background: rgba(99,102,241,0.05); }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-green { background: rgba(34,197,94,0.15); color: var(--green); }
+.badge-yellow { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.badge-red { background: rgba(239,68,68,0.15); color: var(--red); }
+.badge-gray { background: rgba(139,141,151,0.15); color: var(--text-muted); }
+
+/* Status bars */
+.status-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 12px; }
+.status-bar div { height: 100%; transition: width 0.5s; }
+
+/* Filter tabs */
+.tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+.tab {
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+.tab:hover { border-color: var(--accent); color: var(--text); }
+.tab.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+/* Progress ring */
+.progress-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.progress-label { font-size: 13px; min-width: 120px; }
+.progress-bar-bg { flex: 1; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+.progress-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+.progress-pct { font-size: 12px; color: var(--text-muted); min-width: 40px; text-align: right; }
+
+@media (max-width: 900px) {
+  .row-2, .row-3 { grid-template-columns: 1fr; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .container { padding: 16px; }
+}
+
+.loading { text-align: center; padding: 100px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>XMiles Dashboard</h1>
+  <div class="updated">Atualizado em: <span id="updatedAt">--</span></div>
+</div>
+
+<div class="container" id="app">
+  <div class="loading">Carregando dados...</div>
+</div>
+
+<script>
+const fmt = (n) => n.toLocaleString('pt-BR');
+const fmtK = (n) => n >= 1000000 ? (n/1000000).toFixed(1) + 'M' : n >= 1000 ? (n/1000).toFixed(0) + 'K' : n.toString();
+const fmtBRL = (n) => 'R$ ' + n.toLocaleString('pt-BR', {minimumFractionDigits: 0});
+
+const COLORS = {
+  livelo: '#e63888', smiles: '#ff6b00', latam: '#1b0088',
+  green: '#22c55e', yellow: '#eab308', red: '#ef4444',
+  accent: '#6366f1', muted: '#8b8d97', cyan: '#06b6d4',
+};
+
+let DATA = null;
+let selectedOperator = 'ALL';
+
+async function loadData() {
+  try {
+    const r = await fetch('data.json?t=' + Date.now());
+    DATA = await r.json();
+    document.getElementById('updatedAt').textContent = DATA.updated_at;
+    render();
+  } catch (e) {
+    document.getElementById('app').innerHTML = '<div class="loading">Erro ao carregar data.json. Execute extract_data.py primeiro.</div>';
+  }
+}
+
+function getFiltered() {
+  if (selectedOperator === 'ALL') return DATA;
+  const op = DATA.operators.find(o => o.name === selectedOperator);
+  if (!op) return DATA;
+  return {
+    ...DATA,
+    totals: {
+      livelo_pontos: op.livelo.total_pontos,
+      smiles_milhas: op.smiles.total_milhas,
+      latam_milhas: op.latam.total_milhas,
+      total_contas: op.livelo.total_contas,
+      clubes_ativos: op.livelo.clubes_ativos,
+      clubes_pendentes: op.livelo.clubes_pendentes,
+      valor_mensal_total: op.livelo.valor_mensal_clubes,
+    },
+    operators: [op],
+  };
+}
+
+function render() {
+  const d = getFiltered();
+  const t = d.totals;
+  const total_milhas_equiv = t.livelo_pontos + t.smiles_milhas + t.latam_milhas;
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="tabs" id="tabs"></div>
+
+    <div class="section-title"><span class="dot" style="background:${COLORS.accent}"></span> Saldos</div>
+    <div class="kpi-grid">
+      <div class="kpi-card livelo">
+        <div class="kpi-label">Livelo</div>
+        <div class="kpi-value livelo">${fmtK(t.livelo_pontos)}</div>
+        <div class="kpi-sub">${fmt(t.livelo_pontos)} pontos</div>
+      </div>
+      <div class="kpi-card smiles">
+        <div class="kpi-label">Smiles</div>
+        <div class="kpi-value smiles">${fmtK(t.smiles_milhas)}</div>
+        <div class="kpi-sub">${fmt(t.smiles_milhas)} milhas</div>
+      </div>
+      <div class="kpi-card latam">
+        <div class="kpi-label">LATAM Pass</div>
+        <div class="kpi-value latam">${fmtK(t.latam_milhas)}</div>
+        <div class="kpi-sub">${fmt(t.latam_milhas)} milhas</div>
+      </div>
+      <div class="kpi-card info">
+        <div class="kpi-label">Estoque Total</div>
+        <div class="kpi-value" style="color:${COLORS.accent}">${fmtK(total_milhas_equiv)}</div>
+        <div class="kpi-sub">pts + milhas (todos os programas)</div>
+      </div>
+    </div>
+
+    <div class="section-title"><span class="dot" style="background:${COLORS.green}"></span> Producao</div>
+    <div class="kpi-grid">
+      <div class="kpi-card info">
+        <div class="kpi-label">Total Contas</div>
+        <div class="kpi-value" style="color:${COLORS.cyan}">${fmt(t.total_contas)}</div>
+        <div class="kpi-sub">contas cadastradas</div>
+      </div>
+      <div class="kpi-card money">
+        <div class="kpi-label">Clubes Ativos</div>
+        <div class="kpi-value green">${fmt(t.clubes_ativos)}</div>
+        <div class="kpi-sub">${((t.clubes_ativos / t.total_contas) * 100).toFixed(0)}% das contas</div>
+      </div>
+      <div class="kpi-card warn">
+        <div class="kpi-label">Pgto Pendente</div>
+        <div class="kpi-value yellow">${fmt(t.clubes_pendentes)}</div>
+        <div class="kpi-sub">aguardando pagamento</div>
+      </div>
+      <div class="kpi-card money">
+        <div class="kpi-label">Custo Mensal Clubes</div>
+        <div class="kpi-value green">${fmtBRL(t.valor_mensal_total)}</div>
+        <div class="kpi-sub">soma valores de clube Livelo</div>
+      </div>
+    </div>
+
+    <div class="row row-2">
+      <div class="card">
+        <h3>Saldo por Programa</h3>
+        <div class="chart-container"><canvas id="chartSaldo"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Distribuicao de Clubes Livelo</h3>
+        <div class="chart-container"><canvas id="chartClubes"></canvas></div>
+      </div>
+    </div>
+
+    <div class="row row-2">
+      <div class="card">
+        <h3>Status das Contas (Livelo)</h3>
+        <div class="chart-container"><canvas id="chartStatus"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Status das Contas (Smiles)</h3>
+        <div class="chart-container"><canvas id="chartStatusSmiles"></canvas></div>
+      </div>
+    </div>
+
+    ${selectedOperator === 'ALL' ? `
+    <div class="section-title"><span class="dot" style="background:${COLORS.cyan}"></span> Por Operador</div>
+    <div class="card" style="margin-bottom:28px">
+      <h3>Comparativo de Saldos</h3>
+      <div class="chart-container" style="height:300px"><canvas id="chartOperadores"></canvas></div>
+    </div>
+    <div class="card" style="margin-bottom:28px">
+      <table class="op-table">
+        <thead>
+          <tr>
+            <th>Operador</th>
+            <th>Contas</th>
+            <th>Livelo (pts)</th>
+            <th>Smiles (mi)</th>
+            <th>LATAM (mi)</th>
+            <th>Clubes Ativos</th>
+            <th>Pendentes</th>
+            <th>Custo Mensal</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${DATA.operators.map(op => `
+            <tr>
+              <td style="font-weight:600">${op.name}</td>
+              <td>${fmt(op.livelo.total_contas)}</td>
+              <td style="color:${COLORS.livelo}">${fmtK(op.livelo.total_pontos)}</td>
+              <td style="color:${COLORS.smiles}">${fmtK(op.smiles.total_milhas)}</td>
+              <td style="color:#6366f1">${fmtK(op.latam.total_milhas)}</td>
+              <td><span class="badge badge-green">${op.livelo.clubes_ativos}</span></td>
+              <td><span class="badge badge-yellow">${op.livelo.clubes_pendentes}</span></td>
+              <td>${fmtBRL(op.livelo.valor_mensal_clubes)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    ` : ''}
+
+    <div class="section-title"><span class="dot" style="background:${COLORS.yellow}"></span> Saude Operacional</div>
+    <div class="card">
+      <h3>Taxa de Ativacao por Programa</h3>
+      <div id="healthBars"></div>
+    </div>
+  `;
+
+  renderTabs();
+  renderCharts(d);
+  renderHealth(d);
+}
+
+function renderTabs() {
+  const tabs = document.getElementById('tabs');
+  const allOps = ['ALL', ...DATA.operators.map(o => o.name)];
+  tabs.innerHTML = allOps.map(name =>
+    `<button class="tab ${name === selectedOperator ? 'active' : ''}" onclick="selectOp('${name}')">${name === 'ALL' ? 'Todos' : name}</button>`
+  ).join('');
+}
+
+function selectOp(name) {
+  selectedOperator = name;
+  render();
+}
+
+function renderCharts(d) {
+  const t = d.totals;
+
+  // Saldo por Programa (bar)
+  new Chart(document.getElementById('chartSaldo'), {
+    type: 'bar',
+    data: {
+      labels: ['Livelo', 'Smiles', 'LATAM'],
+      datasets: [{
+        data: [t.livelo_pontos, t.smiles_milhas, t.latam_milhas],
+        backgroundColor: [COLORS.livelo, COLORS.smiles, '#4f46e5'],
+        borderRadius: 6,
+        barThickness: 48,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => fmt(ctx.raw) + (ctx.label === 'Livelo' ? ' pts' : ' mi') } }
+      },
+      scales: {
+        y: { ticks: { color: '#8b8d97', callback: v => fmtK(v) }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        x: { ticks: { color: '#8b8d97' }, grid: { display: false } }
+      }
+    }
+  });
+
+  // Clubes Livelo (doughnut)
+  const clubeDist = {};
+  d.operators.forEach(op => {
+    Object.entries(op.livelo.distribuicao_clubes || {}).forEach(([k, v]) => {
+      clubeDist[k] = (clubeDist[k] || 0) + v;
+    });
+  });
+  const clubeLabels = Object.keys(clubeDist);
+  const clubeValues = Object.values(clubeDist);
+  const clubeColors = clubeLabels.map(l => {
+    if (l === 'TOP') return COLORS.livelo;
+    if (l === 'CLASSIC') return '#a855f7';
+    if (l === 'SUPER') return COLORS.cyan;
+    if (l === 'PLUS') return COLORS.green;
+    return '#3f3f46';
+  });
+
+  new Chart(document.getElementById('chartClubes'), {
+    type: 'doughnut',
+    data: { labels: clubeLabels, datasets: [{ data: clubeValues, backgroundColor: clubeColors, borderWidth: 0 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '65%',
+      plugins: { legend: { position: 'right', labels: { color: '#e4e4e7', padding: 12, usePointStyle: true, pointStyleWidth: 8, font: { size: 12 } } } }
+    }
+  });
+
+  // Status Livelo (horizontal bar)
+  const statusDist = {};
+  d.operators.forEach(op => {
+    Object.entries(op.livelo.distribuicao_status || {}).forEach(([k, v]) => {
+      statusDist[k] = (statusDist[k] || 0) + v;
+    });
+  });
+  const statusLabels = Object.keys(statusDist).sort((a,b) => statusDist[b] - statusDist[a]);
+  const statusValues = statusLabels.map(l => statusDist[l]);
+  const statusColors = statusLabels.map(l => {
+    if (l === 'ATIVO') return COLORS.green;
+    if (l.includes('PENDENTE')) return COLORS.yellow;
+    if (l === 'SEM CLUBE') return '#3f3f46';
+    if (l.includes('ERRO')) return COLORS.red;
+    if (l.includes('CANCEL')) return COLORS.red;
+    return COLORS.muted;
+  });
+
+  new Chart(document.getElementById('chartStatus'), {
+    type: 'bar',
+    data: { labels: statusLabels, datasets: [{ data: statusValues, backgroundColor: statusColors, borderRadius: 4, barThickness: 20 }] },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b8d97' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#8b8d97', font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+
+  // Status Smiles
+  const smilesStatusDist = {};
+  d.operators.forEach(op => {
+    Object.entries(op.smiles.distribuicao_status || {}).forEach(([k, v]) => {
+      smilesStatusDist[k] = (smilesStatusDist[k] || 0) + v;
+    });
+  });
+  const sLabels = Object.keys(smilesStatusDist).sort((a,b) => smilesStatusDist[b] - smilesStatusDist[a]);
+  const sValues = sLabels.map(l => smilesStatusDist[l]);
+  const sColors = sLabels.map(l => {
+    if (l === 'ATIVO') return COLORS.green;
+    if (l.includes('PENDENTE')) return COLORS.yellow;
+    if (l === 'SEM CLUBE') return '#3f3f46';
+    if (l.includes('CANCEL')) return COLORS.red;
+    return COLORS.muted;
+  });
+
+  new Chart(document.getElementById('chartStatusSmiles'), {
+    type: 'bar',
+    data: { labels: sLabels, datasets: [{ data: sValues, backgroundColor: sColors, borderRadius: 4, barThickness: 20 }] },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b8d97' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#8b8d97', font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+
+  // Operadores (stacked bar)
+  if (selectedOperator === 'ALL' && document.getElementById('chartOperadores')) {
+    new Chart(document.getElementById('chartOperadores'), {
+      type: 'bar',
+      data: {
+        labels: DATA.operators.map(o => o.name),
+        datasets: [
+          { label: 'Livelo', data: DATA.operators.map(o => o.livelo.total_pontos), backgroundColor: COLORS.livelo, borderRadius: 4 },
+          { label: 'Smiles', data: DATA.operators.map(o => o.smiles.total_milhas), backgroundColor: COLORS.smiles, borderRadius: 4 },
+          { label: 'LATAM', data: DATA.operators.map(o => o.latam.total_milhas), backgroundColor: '#4f46e5', borderRadius: 4 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#e4e4e7', usePointStyle: true, pointStyleWidth: 8, font: { size: 12 } } } },
+        scales: {
+          y: { stacked: false, ticks: { color: '#8b8d97', callback: v => fmtK(v) }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          x: { ticks: { color: '#8b8d97' }, grid: { display: false } }
+        }
+      }
+    });
+  }
+}
+
+function renderHealth(d) {
+  const container = document.getElementById('healthBars');
+  if (!container) return;
+
+  const programs = [
+    { name: 'Livelo', key: 'livelo', color: COLORS.livelo },
+    { name: 'Smiles', key: 'smiles', color: COLORS.smiles },
+  ];
+
+  let html = '';
+  programs.forEach(prog => {
+    let ativos = 0, total = 0;
+    d.operators.forEach(op => {
+      const dist = op[prog.key].distribuicao_status || {};
+      ativos += dist['ATIVO'] || 0;
+      total += Object.values(dist).reduce((a,b) => a + b, 0);
+    });
+    const pct = total > 0 ? ((ativos / total) * 100).toFixed(1) : 0;
+    html += `
+      <div class="progress-row">
+        <div class="progress-label">${prog.name}</div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" style="width:${pct}%;background:${prog.color}"></div>
+        </div>
+        <div class="progress-pct">${pct}%</div>
+      </div>
+    `;
+  });
+
+  // Overall health
+  const totalContas = d.totals.total_contas;
+  const totalAtivos = d.totals.clubes_ativos;
+  const ativoPct = totalContas > 0 ? ((totalAtivos / totalContas) * 100).toFixed(1) : 0;
+  html += `
+    <div class="progress-row" style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">
+      <div class="progress-label" style="font-weight:600">Geral (Livelo)</div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" style="width:${ativoPct}%;background:${COLORS.accent}"></div>
+      </div>
+      <div class="progress-pct" style="font-weight:600">${ativoPct}%</div>
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+loadData();
+setInterval(loadData, 60000);
+</script>
+</body>
+</html>
+
+# XMiles Dashboard
+
+Dashboard de producao e saldos de milhas, alimentado pela planilha de controle.
+
+## Setup no GitHub
+
+1. Criar repositorio no GitHub (ex: `xmiles-dashboard`)
+2. Clonar e copiar os arquivos:
+   ```
+   git clone https://github.com/SEU_USER/xmiles-dashboard.git
+   cd xmiles-dashboard
+   cp /caminho/dashboard-xmiles/* .
+   ```
+3. Push inicial:
+   ```
+   git add .
+   git commit -m "Dashboard inicial"
+   git push
+   ```
+4. Ativar GitHub Pages:
+   - Settings > Pages > Source: Deploy from branch > main > / (root) > Save
+
+## Como atualizar
+
+Sempre que atualizar a planilha:
+
+```bash
+cd xmiles-dashboard
+python3 extract_data.py "../CONTROLE CONTAS LIVELO.xlsx"
+git add data.json
+git commit -m "Atualizar dados $(date +%Y-%m-%d)"
+git push
+```
+
+O dashboard no GitHub Pages sera atualizado automaticamente em ~1 minuto.
+
+## Arquivos
+
+- `index.html` - Dashboard (abre no navegador)
+- `extract_data.py` - Script que le a planilha e gera data.json
+- `data.json` - Dados resumidos (usado pelo dashboard)
+- `data_full.json` - Dados completos com cada conta (backup)
+
+## Automacao (opcional)
+
+Para atualizar automaticamente, crie um GitHub Action:
+
+```yaml
+# .github/workflows/update.yml
+name: Update Dashboard
+on:
+  push:
+    paths: ['CONTROLE CONTAS LIVELO.xlsx']
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install pandas openpyxl
+      - run: python extract_data.py
+      - run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add data.json
+          git diff --staged --quiet || git commit -m "Auto-update $(date +%Y-%m-%d)"
+          git push
+```
